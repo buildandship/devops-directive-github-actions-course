@@ -1,0 +1,282 @@
+name: Outputs Demo - All Formats
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+
+jobs:
+  # ============================================================
+  # JOB 1: Generate outputs in different formats
+  # ============================================================
+  generate-outputs:
+    runs-on: ubuntu-latest
+    # Define job outputs that can be accessed by dependent jobs
+    outputs:
+      # Simple string output
+      version: ${{ steps.set-version.outputs.version }}
+      # JSON string output
+      config-json: ${{ steps.set-json.outputs.config }}
+      # List/Array output (stored as JSON string)
+      file-list: ${{ steps.set-list.outputs.files }}
+      # Multiple values from same step
+      build-info: ${{ steps.set-multiple.outputs.build-info }}
+      timestamp: ${{ steps.set-multiple.outputs.timestamp }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      # --------------------------------------------------------
+      # METHOD 1: Simple Version String Output
+      # --------------------------------------------------------
+      - name: Set Version Output
+        id: set-version
+        run: |
+          # Generate a semantic version
+          VERSION="1.2.3"
+
+          # Set output using GITHUB_OUTPUT
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+
+          # Print for visibility in logs
+          echo "📦 Version set to: $VERSION"
+
+      # --------------------------------------------------------
+      # METHOD 2: JSON String Output
+      # --------------------------------------------------------
+      - name: Set JSON Output
+        id: set-json
+        run: |
+          # Create a JSON object with configuration
+          CONFIG_JSON=$(cat <<EOF
+          {
+            "environment": "production",
+            "region": "us-east-1",
+            "replicas": 3,
+            "features": {
+              "caching": true,
+              "logging": "verbose"
+            }
+          }
+          EOF
+          )
+
+          # Remove newlines and extra spaces for clean JSON string
+          CONFIG_COMPACT=$(echo "$CONFIG_JSON" | jq -c .)
+
+          # Set as output (must be single line)
+          echo "config=$CONFIG_COMPACT" >> $GITHUB_OUTPUT
+
+          # Print formatted JSON to logs
+          echo "⚙️  Configuration JSON:"
+          echo "$CONFIG_JSON" | jq .
+
+      # --------------------------------------------------------
+      # METHOD 3: List/Array Output (as JSON array)
+      # --------------------------------------------------------
+      - name: Set List Output
+        id: set-list
+        run: |
+          # Generate a list of files (simulated)
+          FILES='["app.js", "config.yaml", "Dockerfile", "README.md"]'
+
+          # Set as output
+          echo "files=$FILES" >> $GITHUB_OUTPUT
+
+          # Print the list
+          echo "📄 File list:"
+          echo "$FILES" | jq -r '.[]' | while read file; do
+            echo "  - $file"
+          done
+
+      # --------------------------------------------------------
+      # METHOD 4: Multiple Outputs from Same Step
+      # --------------------------------------------------------
+      - name: Set Multiple Outputs
+        id: set-multiple
+        run: |
+          # Generate multiple related outputs
+          BUILD_NUMBER="42"
+          COMMIT_SHA="${{ github.sha }}"
+          TIMESTAMP=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+
+          # Combine into JSON for complex data
+          BUILD_INFO=$(jq -n \
+            --arg build "$BUILD_NUMBER" \
+            --arg sha "$COMMIT_SHA" \
+            '{build_number: $build, commit: $sha}')
+
+          # Set multiple outputs
+          echo "build-info=$BUILD_INFO" >> $GITHUB_OUTPUT
+          echo "timestamp=$TIMESTAMP" >> $GITHUB_OUTPUT
+
+          echo "🔨 Build Info: $BUILD_INFO"
+          echo "⏰ Timestamp: $TIMESTAMP"
+
+      # --------------------------------------------------------
+      # Print all outputs from this job
+      # --------------------------------------------------------
+      - name: Display All Generated Outputs
+        run: |
+          echo "========================================="
+          echo "ALL OUTPUTS FROM THIS JOB"
+          echo "========================================="
+          echo ""
+          echo "Version: ${{ steps.set-version.outputs.version }}"
+          echo ""
+          echo "Config JSON:"
+          echo '${{ steps.set-json.outputs.config }}' | jq .
+          echo ""
+          echo "File List:"
+          echo '${{ steps.set-list.outputs.files }}' | jq -r '.[]'
+          echo ""
+          echo "Build Info:"
+          echo '${{ steps.set-multiple.outputs.build-info }}' | jq .
+          echo ""
+          echo "Timestamp: ${{ steps.set-multiple.outputs.timestamp }}"
+          echo "========================================="
+
+  # ============================================================
+  # JOB 2: Consume outputs from Job 1
+  # ============================================================
+  use-outputs:
+    runs-on: ubuntu-latest
+    # This job depends on generate-outputs job
+    needs: generate-outputs
+
+    steps:
+      # --------------------------------------------------------
+      # Access and use the version output
+      # --------------------------------------------------------
+      - name: Use Version Output
+        run: |
+          VERSION="${{ needs.generate-outputs.outputs.version }}"
+          echo "📦 Received version: $VERSION"
+
+          # Use in conditional logic
+          if [[ "$VERSION" == "1.2.3" ]]; then
+            echo "✅ Version matches expected value"
+          fi
+
+      # --------------------------------------------------------
+      # Parse and use JSON output
+      # --------------------------------------------------------
+      - name: Use JSON Output
+        run: |
+          # Store JSON in variable
+          CONFIG='${{ needs.generate-outputs.outputs.config-json }}'
+
+          echo "⚙️  Full configuration:"
+          echo "$CONFIG" | jq .
+
+          # Extract specific values from JSON
+          ENVIRONMENT=$(echo "$CONFIG" | jq -r '.environment')
+          REGION=$(echo "$CONFIG" | jq -r '.region')
+          REPLICAS=$(echo "$CONFIG" | jq -r '.replicas')
+          CACHING=$(echo "$CONFIG" | jq -r '.features.caching')
+
+          echo ""
+          echo "Extracted values:"
+          echo "  Environment: $ENVIRONMENT"
+          echo "  Region: $REGION"
+          echo "  Replicas: $REPLICAS"
+          echo "  Caching enabled: $CACHING"
+
+      # --------------------------------------------------------
+      # Iterate over list output
+      # --------------------------------------------------------
+      - name: Use List Output
+        run: |
+          FILES='${{ needs.generate-outputs.outputs.file-list }}'
+
+          echo "📄 Processing files from list:"
+          echo "$FILES" | jq -r '.[]' | while read file; do
+            echo "  Processing: $file"
+            # Simulate file processing
+            echo "    ✓ File validated"
+          done
+
+          # Count items in list
+          COUNT=$(echo "$FILES" | jq 'length')
+          echo ""
+          echo "Total files: $COUNT"
+
+      # --------------------------------------------------------
+      # Use multiple outputs together
+      # --------------------------------------------------------
+      - name: Use Multiple Outputs
+        run: |
+          BUILD_INFO='${{ needs.generate-outputs.outputs.build-info }}'
+          TIMESTAMP='${{ needs.generate-outputs.outputs.timestamp }}'
+          VERSION='${{ needs.generate-outputs.outputs.version }}'
+
+          echo "🚀 Deployment Summary:"
+          echo "  Version: $VERSION"
+          echo "  Timestamp: $TIMESTAMP"
+          echo "  Build Info:"
+          echo "$BUILD_INFO" | jq .
+
+          # Extract build number from JSON
+          BUILD_NUM=$(echo "$BUILD_INFO" | jq -r '.build_number')
+          COMMIT=$(echo "$BUILD_INFO" | jq -r '.commit')
+
+          echo ""
+          echo "📋 Release Notes:"
+          echo "  Build #$BUILD_NUM"
+          echo "  Commit: ${COMMIT:0:7}"
+          echo "  Released: $TIMESTAMP"
+
+      # --------------------------------------------------------
+      # Create matrix from list output
+      # --------------------------------------------------------
+      - name: Generate Matrix from List
+        id: matrix-gen
+        run: |
+          FILES='${{ needs.generate-outputs.outputs.file-list }}'
+
+          # Create matrix strategy from list
+          MATRIX=$(echo "$FILES" | jq -c '{file: .}')
+          echo "matrix=$MATRIX" >> $GITHUB_OUTPUT
+
+          echo "🔄 Generated matrix for parallel processing:"
+          echo "$MATRIX" | jq .
+
+  # ============================================================
+  # JOB 3: Dynamic Matrix Job using outputs
+  # ============================================================
+  matrix-job:
+    runs-on: ubuntu-latest
+    needs: generate-outputs
+    strategy:
+      matrix:
+        # Parse the file list into a matrix
+        file: ${{ fromJson(needs.generate-outputs.outputs.file-list) }}
+
+    steps:
+      - name: Process File in Parallel
+        run: |
+          echo "🔨 Processing: ${{ matrix.file }}"
+          echo "  Version context: ${{ needs.generate-outputs.outputs.version }}"
+          # Simulate processing
+          sleep 2
+          echo "  ✅ Completed: ${{ matrix.file }}"
+
+  # ============================================================
+  # JOB 4: Conditional job based on outputs
+  # ============================================================
+  conditional-job:
+    runs-on: ubuntu-latest
+    needs: generate-outputs
+    # Only run if version is 1.2.3
+    if: needs.generate-outputs.outputs.version == '1.2.3'
+
+    steps:
+      - name: Conditional Execution
+        run: |
+          echo "✅ This job runs because version is ${{ needs.generate-outputs.outputs.version }}"
+
+          CONFIG='${{ needs.generate-outputs.outputs.config-json }}'
+          ENV=$(echo "$CONFIG" | jq -r '.environment')
+
+          echo "Deploying to: $ENV"
